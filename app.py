@@ -9,16 +9,14 @@ import requests
 import pandas as pd
 
 # =====================================================
-# CONFIG
+# CONFIGURAÇÕES
 # =====================================================
-
 BASE_URL_DEFAULT = "https://apis.tangerino.com.br/punch"
 DB_FILE = "punches.db"
 
 # =====================================================
-# DATABASE
+# BANCO DE DADOS
 # =====================================================
-
 def init_db():
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     cur = conn.cursor()
@@ -45,65 +43,70 @@ def init_db():
     conn.commit()
     return conn
 
-def get_meta(conn, key):
-    cur = conn.cursor()
-    cur.execute("SELECT value FROM metadata WHERE key=?", (key,))
-    row = cur.fetchone()
-    return row[0] if row else None
+def get_meta(key):
+    with sqlite3.connect(DB_FILE) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM metadata WHERE key=?", (key,))
+        row = cur.fetchone()
+        return row[0] if row else None
 
-def set_meta(conn, key, value):
-    cur = conn.cursor()
-    cur.execute(
-        "INSERT OR REPLACE INTO metadata (key,value) VALUES (?,?)",
-        (key, value)
-    )
-    conn.commit()
+def set_meta(key, value):
+    with sqlite3.connect(DB_FILE) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT OR REPLACE INTO metadata (key,value) VALUES (?,?)",
+            (key, value)
+        )
+        conn.commit()
 
-def save_punches(conn, punches):
-    cur = conn.cursor()
-    now = int(time.time() * 1000)
-    total = 0
-
-    for p in punches:
-        cur.execute("""
-        INSERT OR REPLACE INTO punches
-        (id, employeeId, date, status, lastModifiedDate, raw_json, inserted_at)
-        VALUES (?,?,?,?,?,?,?)
-        """, (
-            p.get("id"),
-            p.get("employeeId"),
-            p.get("date"),
-            p.get("status"),
-            p.get("lastModifiedDate"),
-            json.dumps(p, ensure_ascii=False),
-            now
-        ))
-        total += 1
-
-    conn.commit()
-    return total
+def save_punches(punches):
+    with sqlite3.connect(DB_FILE) as conn:
+        cur = conn.cursor()
+        now = int(time.time() * 1000)
+        total = 0
+        for p in punches:
+            cur.execute("""
+            INSERT OR REPLACE INTO punches
+            (id, employeeId, date, status, lastModifiedDate, raw_json, inserted_at)
+            VALUES (?,?,?,?,?,?,?)
+            """, (
+                p.get("id"),
+                p.get("employeeId"),
+                p.get("date"),
+                p.get("status"),
+                p.get("lastModifiedDate"),
+                json.dumps(p, ensure_ascii=False),
+                now
+            ))
+            total += 1
+        conn.commit()
+        return total
 
 # =====================================================
 # API
 # =====================================================
-
 def call_api(url, token, params):
     headers = {
         "Authorization": token,
         "Accept": "application/json"
     }
 
-    r = requests.get(url, headers=headers, params=params, timeout=40)
+    try:
+        r = requests.get(url, headers=headers, params=params, timeout=40)
+    except Exception as e:
+        st.error(f"Erro ao conectar API: {e}")
+        raise
 
     st.code(f"URL chamada:\n{r.url}")
+    st.write(f"Status code: {r.status_code}")
 
     if not r.ok:
-        st.error(f"HTTP {r.status_code}")
+        st.error("Erro na API")
         try:
             st.json(r.json())
         except:
             st.text(r.text)
-        raise Exception("Erro na API")
+        raise Exception(f"Erro na API: HTTP {r.status_code}")
 
     return r.json()
 
@@ -116,15 +119,14 @@ def fetch_all(url, token, params):
         p["page"] = page
 
         data = call_api(url, token, p)
-
-        items = data.get("content")
+        items = data.get("content", [])
 
         if not items:
             break
 
         results.extend(items)
 
-        if data.get("last") is True:
+        if data.get("last", True):
             break
 
         page += 1
@@ -134,18 +136,16 @@ def fetch_all(url, token, params):
 # =====================================================
 # STREAMLIT UI
 # =====================================================
-
 st.set_page_config("Tangerino Punch Sync", layout="wide")
 st.title("📊 Tangerino — Sync de registros de ponto")
 
-conn = init_db()
+# Inicializa banco
+init_db()
 
 # =====================================================
 # TOKEN
 # =====================================================
-
 token = st.secrets.get("TANGERINO_TOKEN") or os.getenv("TANGERINO_TOKEN")
-
 if not token:
     st.error("Configure TANGERINO_TOKEN nos Secrets do Streamlit")
     st.stop()
@@ -153,19 +153,15 @@ if not token:
 # =====================================================
 # SIDEBAR
 # =====================================================
-
 with st.sidebar:
     st.header("⚙️ Configuração")
-
     base_url = st.text_input("Endpoint", BASE_URL_DEFAULT)
 
     st.markdown("### 📅 Período")
-
     start_date = st.date_input(
         "Data inicial",
         datetime.today().date() - timedelta(days=30)
     )
-
     end_date = st.date_input(
         "Data final",
         datetime.today().date()
@@ -175,12 +171,10 @@ with st.sidebar:
     end_str = end_date.strftime("%Y-%m-%d")
 
     st.markdown("### 🔍 Filtros")
-
     status = st.selectbox(
         "Status",
         ["", "APPROVED", "PENDING", "REPROVED"]
     )
-
     employee_id = st.text_input("Employee ID (opcional)")
 
     page_size = st.number_input(
@@ -194,18 +188,15 @@ with st.sidebar:
 # =====================================================
 # LAST UPDATE
 # =====================================================
-
-last_sync = get_meta(conn, "last_sync")
-
+last_sync = get_meta("last_sync")
 if last_sync:
     st.info(f"Último incremental: {datetime.fromtimestamp(int(last_sync)/1000)}")
 else:
     st.info("Nenhum sync incremental executado")
 
 # =====================================================
-# BUTTONS
+# BOTÕES
 # =====================================================
-
 c1, c2, c3 = st.columns(3)
 
 # ---------- FULL LOAD ----------
@@ -216,20 +207,15 @@ with c1:
             "endDate": end_str,
             "size": page_size
         }
-
         if status:
             params["status"] = status
-
         if employee_id:
             params["employeeId"] = employee_id
 
         st.json(params)
-
         punches = fetch_all(base_url, token, params)
-        saved = save_punches(conn, punches)
-
-        set_meta(conn, "last_sync", str(int(time.time() * 1000)))
-
+        saved = save_punches(punches)
+        set_meta("last_sync", str(int(time.time() * 1000)))
         st.success(f"{saved} registros importados")
 
 # ---------- INCREMENTAL ----------
@@ -243,28 +229,23 @@ with c2:
             "lastUpdate": int(last_sync),
             "size": page_size
         }
-
         if status:
             params["status"] = status
 
         st.json(params)
-
         punches = fetch_all(base_url, token, params)
-        saved = save_punches(conn, punches)
-
-        set_meta(conn, "last_sync", str(int(time.time() * 1000)))
-
+        saved = save_punches(punches)
+        set_meta("last_sync", str(int(time.time() * 1000)))
         st.success(f"{saved} registros atualizados")
 
-# ---------- EXPORT ----------
+# ---------- EXPORTAR CSV ----------
 with c3:
     if st.button("📄 Exportar CSV"):
-        df = pd.read_sql_query("SELECT * FROM punches ORDER BY date", conn)
-        csv = df.to_csv(index=False)
-
+        with sqlite3.connect(DB_FILE) as conn:
+            df = pd.read_sql_query("SELECT * FROM punches ORDER BY date", conn)
         st.download_button(
             "⬇️ Download CSV",
-            csv,
+            df.to_csv(index=False),
             file_name="tangerino_punches.csv",
             mime="text/csv"
         )
@@ -272,13 +253,11 @@ with c3:
 # =====================================================
 # PREVIEW
 # =====================================================
-
 st.markdown("---")
 st.subheader("📋 Últimos registros")
-
-preview = pd.read_sql_query(
-    "SELECT id, employeeId, date, status, lastModifiedDate FROM punches ORDER BY inserted_at DESC LIMIT 100",
-    conn
-)
-
+with sqlite3.connect(DB_FILE) as conn:
+    preview = pd.read_sql_query(
+        "SELECT id, employeeId, date, status, lastModifiedDate FROM punches ORDER BY inserted_at DESC LIMIT 100",
+        conn
+    )
 st.dataframe(preview)
