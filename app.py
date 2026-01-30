@@ -1,263 +1,135 @@
 import os
-import json
-import time
-import sqlite3
-from datetime import datetime, timedelta
-
-import streamlit as st
 import requests
 import pandas as pd
+import sqlite3
+import streamlit as st
+from datetime import datetime, timedelta
 
-# =====================================================
+# ================================
 # CONFIGURAÇÕES
-# =====================================================
-BASE_URL_DEFAULT = "https://apis.tangerino.com.br/punch"
-DB_FILE = "punches.db"
+# ================================
+DB_FILE = "tangerino.db"
+BASE_URL = "https://apis.tangerino.com.br/punch"
 
-# =====================================================
-# BANCO DE DADOS
-# =====================================================
+# Token vindo do secret do Streamlit
+TOKEN = st.secrets.get("TANGERINO_TOKEN", "")
+HEADERS = {"Authorization": f"Basic {TOKEN}"}
+
+# ================================
+# FUNÇÕES
+# ================================
+
 def init_db():
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
-    cur = conn.cursor()
-
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS punches (
-        id INTEGER PRIMARY KEY,
-        employeeId INTEGER,
-        date TEXT,
-        status TEXT,
-        lastModifiedDate TEXT,
-        raw_json TEXT,
-        inserted_at INTEGER
-    )
-    """)
-
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS metadata (
-        key TEXT PRIMARY KEY,
-        value TEXT
-    )
-    """)
-
-    conn.commit()
-    return conn
-
-def get_meta(key):
+    """Inicializa o banco de dados, criando a tabela se não existir"""
     with sqlite3.connect(DB_FILE) as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT value FROM metadata WHERE key=?", (key,))
-        row = cur.fetchone()
-        return row[0] if row else None
-
-def set_meta(key, value):
-    with sqlite3.connect(DB_FILE) as conn:
-        cur = conn.cursor()
-        cur.execute(
-            "INSERT OR REPLACE INTO metadata (key,value) VALUES (?,?)",
-            (key, value)
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS punches (
+            id INTEGER PRIMARY KEY,
+            employeeId INTEGER,
+            date TEXT,
+            status TEXT,
+            lastModifiedDate TEXT,
+            inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
-        conn.commit()
+        """)
 
-def save_punches(punches):
+def fetch_page(params):
+    """Busca uma página de punches da API"""
+    response = requests.get(BASE_URL, headers=HEADERS, params=params, timeout=15)
+    if response.status_code != 200:
+        st.error(f"Erro na API: {response.status_code} - {response.text}")
+        return None
+    return response.json().get("content", [])
+
+def save_punches(data):
+    """Salva os punches no banco SQLite"""
+    if not data:
+        return 0
+    df = pd.DataFrame(data)
+    # Pega apenas colunas essenciais
+    df = df[["id", "employeeId", "date", "status", "lastModifiedDate"]]
     with sqlite3.connect(DB_FILE) as conn:
-        cur = conn.cursor()
-        now = int(time.time() * 1000)
-        total = 0
-        for p in punches:
-            cur.execute("""
-            INSERT OR REPLACE INTO punches
-            (id, employeeId, date, status, lastModifiedDate, raw_json, inserted_at)
-            VALUES (?,?,?,?,?,?,?)
-            """, (
-                p.get("id"),
-                p.get("employeeId"),
-                p.get("date"),
-                p.get("status"),
-                p.get("lastModifiedDate"),
-                json.dumps(p, ensure_ascii=False),
-                now
-            ))
-            total += 1
-        conn.commit()
-        return total
+        df.to_sql("punches", conn, if_exists="append", index=False)
+    return len(df)
 
-# =====================================================
-# API
-# =====================================================
-def call_api(url, token, params):
-    headers = {
-        "Authorization": token,
-        "Accept": "application/json"
-    }
-
-    try:
-        r = requests.get(url, headers=headers, params=params, timeout=40)
-    except Exception as e:
-        st.error(f"Erro ao conectar API: {e}")
-        raise
-
-    st.code(f"URL chamada:\n{r.url}")
-    st.write(f"Status code: {r.status_code}")
-
-    if not r.ok:
-        st.error("Erro na API")
-        try:
-            st.json(r.json())
-        except:
-            st.text(r.text)
-        raise Exception(f"Erro na API: HTTP {r.status_code}")
-
-    return r.json()
-
-def fetch_all(url, token, params):
+def fetch_all(last_update=None, page_size=200):
+    """Busca todos os punches desde o last_update"""
+    if last_update is None:
+        last_update = 0  # default para sync completo
     page = 0
-    results = []
-
+    total = 0
     while True:
-        p = params.copy()
-        p["page"] = page
-
-        data = call_api(url, token, p)
-        items = data.get("content", [])
-
-        if not items:
+        params = {"lastUpdate": last_update, "size": page_size, "page": page}
+        st.write(f"🔄 Buscando página {page}...")
+        punches = fetch_page(params)
+        if punches is None:
             break
-
-        results.extend(items)
-
-        if data.get("last", True):
+        count = save_punches(punches)
+        total += count
+        if len(punches) < page_size:
             break
-
         page += 1
+    st.success(f"✅ Total de {total} punches importados.")
 
-    return results
+# ================================
+# INTERFACE STREAMLIT
+# ================================
 
-# =====================================================
-# STREAMLIT UI
-# =====================================================
-st.set_page_config("Tangerino Punch Sync", layout="wide")
-st.title("📊 Tangerino — Sync de registros de ponto")
+st.title("Tangerino Punch Sync")
 
-# Inicializa banco
 init_db()
 
-# =====================================================
-# TOKEN
-# =====================================================
-token = st.secrets.get("TANGERINO_TOKEN") or os.getenv("TANGERINO_TOKEN")
-if not token:
-    st.error("Configure TANGERINO_TOKEN nos Secrets do Streamlit")
-    st.stop()
+st.sidebar.header("Filtros da sincronização")
+sync_type = st.sidebar.selectbox("Tipo de sincronização", ["Completo", "Incremental"])
+last_update_input = st.sidebar.text_input(
+    "Último timestamp Unix para incremental (deixe vazio para usar 0)", ""
+)
 
-# =====================================================
-# SIDEBAR
-# =====================================================
-with st.sidebar:
-    st.header("⚙️ Configuração")
-    base_url = st.text_input("Endpoint", BASE_URL_DEFAULT)
+page_size = st.sidebar.number_input("Tamanho da página", min_value=50, max_value=500, value=200, step=50)
 
-    st.markdown("### 📅 Período")
-    start_date = st.date_input(
-        "Data inicial",
-        datetime.today().date() - timedelta(days=30)
-    )
-    end_date = st.date_input(
-        "Data final",
-        datetime.today().date()
-    )
+if st.sidebar.button("⏳ Sincronizar"):
+    try:
+        if sync_type == "Completo":
+            last_update = 0
+        else:
+            last_update = int(last_update_input) if last_update_input.strip() else 0
+        fetch_all(last_update, page_size)
+    except Exception as e:
+        st.error(f"Erro durante a sincronização: {e}")
 
-    start_str = start_date.strftime("%Y-%m-%d")
-    end_str = end_date.strftime("%Y-%m-%d")
-
-    st.markdown("### 🔍 Filtros")
-    status = st.selectbox(
-        "Status",
-        ["", "APPROVED", "PENDING", "REPROVED"]
-    )
-    employee_id = st.text_input("Employee ID (opcional)")
-
-    page_size = st.number_input(
-        "Page size",
-        50,
-        1000,
-        200,
-        step=50
-    )
-
-# =====================================================
-# LAST UPDATE
-# =====================================================
-last_sync = get_meta("last_sync")
-if last_sync:
-    st.info(f"Último incremental: {datetime.fromtimestamp(int(last_sync)/1000)}")
-else:
-    st.info("Nenhum sync incremental executado")
-
-# =====================================================
-# BOTÕES
-# =====================================================
-c1, c2, c3 = st.columns(3)
-
-# ---------- FULL LOAD ----------
-with c1:
-    if st.button("📥 Carga completa"):
-        params = {
-            "startDate": start_str,
-            "endDate": end_str,
-            "size": page_size
-        }
-        if status:
-            params["status"] = status
-        if employee_id:
-            params["employeeId"] = employee_id
-
-        st.json(params)
-        punches = fetch_all(base_url, token, params)
-        saved = save_punches(punches)
-        set_meta("last_sync", str(int(time.time() * 1000)))
-        st.success(f"{saved} registros importados")
-
-# ---------- INCREMENTAL ----------
-with c2:
-    if st.button("🔄 Sync incremental"):
-        if not last_sync:
-            st.warning("Execute uma carga completa primeiro")
-            st.stop()
-
-        params = {
-            "lastUpdate": int(last_sync),
-            "size": page_size
-        }
-        if status:
-            params["status"] = status
-
-        st.json(params)
-        punches = fetch_all(base_url, token, params)
-        saved = save_punches(punches)
-        set_meta("last_sync", str(int(time.time() * 1000)))
-        st.success(f"{saved} registros atualizados")
-
-# ---------- EXPORTAR CSV ----------
-with c3:
-    if st.button("📄 Exportar CSV"):
-        with sqlite3.connect(DB_FILE) as conn:
-            df = pd.read_sql_query("SELECT * FROM punches ORDER BY date", conn)
-        st.download_button(
-            "⬇️ Download CSV",
-            df.to_csv(index=False),
-            file_name="tangerino_punches.csv",
-            mime="text/csv"
-        )
-
-# =====================================================
-# PREVIEW
-# =====================================================
+# ================================
+# PREVIEW SEGURO
+# ================================
 st.markdown("---")
-st.subheader("📋 Últimos registros")
-with sqlite3.connect(DB_FILE) as conn:
-    preview = pd.read_sql_query(
-        "SELECT id, employeeId, date, status, lastModifiedDate FROM punches ORDER BY inserted_at DESC LIMIT 100",
-        conn
+st.subheader("📋 Preview dos últimos registros (limitado a 20)")
+
+try:
+    with sqlite3.connect(DB_FILE) as conn:
+        preview_df = pd.read_sql_query(
+            "SELECT id, employeeId, date, status, lastModifiedDate FROM punches ORDER BY inserted_at DESC LIMIT 20",
+            conn
+        )
+    st.dataframe(preview_df)
+except Exception as e:
+    st.error(f"Erro ao carregar preview: {e}")
+
+# ================================
+# EXPORTAR CSV
+# ================================
+st.markdown("---")
+st.subheader("📄 Exportar todos os registros para CSV")
+
+try:
+    with sqlite3.connect(DB_FILE) as conn:
+        full_df = pd.read_sql_query(
+            "SELECT id, employeeId, date, status, lastModifiedDate FROM punches ORDER BY inserted_at DESC",
+            conn
+        )
+    st.download_button(
+        label="⬇️ Download CSV",
+        data=full_df.to_csv(index=False),
+        file_name="tangerino_punches.csv",
+        mime="text/csv"
     )
-st.dataframe(preview)
+except Exception as e:
+    st.error(f"Erro ao gerar CSV: {e}")
