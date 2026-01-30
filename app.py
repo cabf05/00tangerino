@@ -32,9 +32,9 @@ import pandas as pd
 # ---------------------------
 # CONFIG / CONSTANTS
 # ---------------------------
-DEFAULT_BASE = "https://apis.tangerino.com.br"
+DEFAULT_BASE = "https://api.tangerino.com.br/api"
 DEFAULT_ENDPOINTS = [
-    "/punch",
+    "/punch/v2",
     "/punch/search",
     "/punch/page",
     "/v1/punch",
