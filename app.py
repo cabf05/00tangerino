@@ -1,53 +1,46 @@
 import streamlit as st
 import requests
 import pandas as pd
+from datetime import datetime
 
-# ---------------------------
-# Configurações
-# ---------------------------
-BASE_URL = "https://apis.tangerino.com.br/punch/"  # note a barra no final
-TOKEN = st.secrets.get("TANGERINO_TOKEN", "")
+st.set_page_config(page_title="Tangerino → CSV", layout="wide")
 
-HEADERS = {
-    "Authorization": TOKEN,
-    "Accept": "application/json;charset=UTF-8",
+st.title("Exportar Punch da Tangerino")
+
+URL = "https://apis.tangerino.com.br/punch/"
+
+headers = {
+    "accept": "application/json;charset=UTF-8",
+    "Authorization": st.secrets["TANGERINO_AUTH"]
 }
 
-st.title("Teste de integração com Tangerino")
+if st.button("Buscar dados"):
+    with st.spinner("Buscando dados da Tangerino..."):
+        r = requests.get(URL, headers=headers, timeout=30)
 
-# ---------------------------
-# Parâmetros (filtros)
-# ---------------------------
-params = {
-    "size": 10,      # pegar apenas 10 para teste
-    "page": 0
-}
+    if r.status_code != 200:
+        st.error(f"Erro {r.status_code}")
+        st.code(r.text)
+        st.stop()
 
-st.write("Buscando punches...")
+    data = r.json()
 
-# ---------------------------
-# Requisição
-# ---------------------------
-try:
-    response = requests.get(BASE_URL, headers=HEADERS, params=params, timeout=15)
-    st.write("Status code:", response.status_code)
+    # pega a lista correta
+    records = data.get("content", [])
 
-    response.raise_for_status()  # lança exceção se não for 2xx
+    if not records:
+        st.warning("Nenhum registro encontrado")
+        st.stop()
 
-    data = response.json()
-    punches = data.get("content", [])
+    df = pd.json_normalize(records, sep="_")
 
-    if not punches:
-        st.warning("Nenhum punch retornado")
-    else:
-        df = pd.json_normalize(punches)
-        st.dataframe(df.head(10))
+    st.dataframe(df, use_container_width=True)
 
-        # Exportar CSV
-        csv = df.to_csv(index=False).encode("utf-8")
-        st.download_button("Baixar CSV", csv, "punches.csv", "text/csv")
+    csv = df.to_csv(index=False).encode("utf-8")
 
-except requests.exceptions.HTTPError as err:
-    st.error(f"Erro HTTP: {err} - {response.text}")
-except Exception as e:
-    st.error(f"Erro inesperado: {e}")
+    st.download_button(
+        "📥 Baixar CSV",
+        csv,
+        file_name=f"tangerino_punch_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+        mime="text/csv"
+    )
