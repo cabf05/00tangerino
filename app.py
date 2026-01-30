@@ -1,13 +1,24 @@
+import streamlit as st
 import requests
+
+st.title("Teste Tangerino /test")
 
 url = "https://employer.tangerino.com.br/test"
 
 headers = {
     "accept": "application/json;charset=UTF-8",
-    "Authorization": "Basic YzM1MDM5MDEyNThhNGU3MGIyYmM4ZjA0NWU0ZTAyYWY6MzE3MmU3M2Y0YTQ2NDliNmE0ZTJhYzFlMjViN2JhMGU="
+    "Authorization": st.secrets["TANGERINO_AUTH"]
 }
 
-response = requests.get(url, headers=headers, timeout=20)
+if st.button("Testar endpoint"):
+    st.write("Fazendo request...")
 
-print("Status:", response.status_code)
-print("Body:", response.text)
+    try:
+        response = requests.get(url, headers=headers, timeout=20)
+    except Exception as e:
+        st.error(e)
+        st.stop()
+
+    st.write("Status:", response.status_code)
+    st.write("Headers:", dict(response.headers))
+    st.code(response.text if response.text else "(resposta vazia)")
