@@ -13,7 +13,7 @@ BASE_URL = "https://apis.tangerino.com.br/punch"
 
 # Token vindo do secret do Streamlit
 TOKEN = st.secrets.get("TANGERINO_TOKEN", "")
-HEADERS = {"Authorization":TOKEN}
+HEADERS = {"Authorization": TOKEN}
 
 # ================================
 # FUNÇÕES
