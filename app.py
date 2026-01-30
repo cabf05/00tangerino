@@ -7,7 +7,7 @@ st.set_page_config(page_title="Tangerino → CSV", layout="wide")
 
 st.title("Exportar Punch da Tangerino")
 
-URL = "https://apis.tangerino.com.br/punch/?page=0&size=50"
+URL = "https://employer.tangerino.com.br/test"
 
 headers = {
     "accept": "application/json;charset=UTF-8",
