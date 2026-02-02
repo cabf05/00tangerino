@@ -3,7 +3,7 @@ import requests
 
 st.title("Teste Tangerino /test")
 
-url = "https://apis.tangerino.com.br/punch/" #"https://employer.tangerino.com.br/test" #"https://apis.tangerino.com.br/punch/?pageSize=1&size=1" #"https://employer.tangerino.com.br/test" #"https://apis.tangerino.com.br/punch/?adjustment=true&pageSize=1&size=1" 
+url = "https://employer.tangerino.com.br/test" #"https://employer.tangerino.com.br/test" #"https://apis.tangerino.com.br/punch/?pageSize=1&size=1" #"https://employer.tangerino.com.br/test" #"https://apis.tangerino.com.br/punch/?adjustment=true&pageSize=1&size=1" 
 
 headers = {
     "accept": "application/json;charset=UTF-8",
