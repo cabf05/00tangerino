@@ -3,17 +3,22 @@ import requests
 
 st.title("Teste Tangerino /test")
 
-url = "https://apis.tangerino.com.br/punch/" #"https://employer.tangerino.com.br/test" #"https://apis.tangerino.com.br/punch/?pageSize=1&size=1" #"https://employer.tangerino.com.br/test" #"https://apis.tangerino.com.br/punch/?adjustment=true&pageSize=1&size=1" 
+# URL corrigida com barra no final
+url = "https://apis.tangerino.com.br/punch"
 
+# Headers incluindo User-Agent
 headers = {
     "accept": "application/json;charset=UTF-8",
-    "Authorization": st.secrets["TANGERINO_AUTH"]
+    "Authorization": st.secrets["TANGERINO_AUTH"],
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
 
 if st.button("Testar endpoint"):
     st.write("Fazendo request...")
 
     try:
+        # Fazendo request GET
         response = requests.get(url, headers=headers, timeout=20)
     except Exception as e:
         st.error(e)
