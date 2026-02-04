@@ -9,7 +9,7 @@ url = "https://apis.tangerino.com.br/punch"
 # Headers incluindo User-Agent
 headers = {
     "accept": "application/json;charset=UTF-8",
-    "Authorization": "Basic YzM1MDM5MDEyNThhNGU3MGIyYmM4ZjA0NWU0ZTAyYWY6MzE3MmU3M2Y0YTQ2NDliNmE0ZTJhYzFlMjViN2JhMGU="
+    "Authorization": st.secrets["TANGERINO_AUTH"]
     #"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                  # "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
